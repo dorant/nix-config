@@ -1,0 +1,13 @@
+repos:
+  - repo: local
+    hooks:
+      - id: treefmt
+        name: treefmt
+        entry: nix fmt
+        language: system
+        pass_filenames: false
+      - id: lint
+        name: lint
+        entry: nix run .#lint
+        language: system
+        pass_filenames: false

@@ -1,3 +1,16 @@
 # -*- mode: gitignore; -*-
 *~
 \#*\#
+
+result
+result-*
+
+# The Kiro CLI release tarball is vendored next to its Dockerfile so the image
+# builds without a -f flag, but the binaries (~570 MB) stay out of git and the
+# Nix store. Keep a local copy; re-extract from the release to rebuild.
+containers/kiro-cli/kirocli-*/
+
+# home-manager writes these when activation finds a file in its way. They
+# should not appear here at all; if one does, a $HOME path is still symlinked
+# into the repo (see the README's symlink-removal step).
+*.backup

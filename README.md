@@ -1,367 +1,359 @@
-# dotfiles
+# nix-config
 
-### Prepare
-```
-sudo apt install git
-<Clone this repo>
-```
+Nix flake managing an Ubuntu laptop (standalone home-manager), a macOS machine
+(nix-darwin + home-manager) and a set of headless Linux servers from one set of
+modules.
 
-### Setup git
-```
-git config --global pager.branch false
-git config --global alias.co checkout
-git config --global alias.br branch
-git config --global alias.ci commit
-git config --global alias.st status
+## What Nix owns, and what it does not
 
-## Set git config for this repo:
-git config user.email "xxxx@gmail.com"
-```
+| Managed by Nix (home-manager)      | Left to apt                                |
+| ---------------------------------- | ------------------------------------------ |
+| All config files under `~/.config` | i3, i3lock, picom, rofi, dunst, i3blocks   |
+| zsh, git, CLI tooling, fonts       | X server, display manager, GPU drivers     |
+| The X helper scripts (`pkgs/`)     | nm-applet, blueman, pasystray, pavucontrol |
+| Per-machine values                 | Chrome, Slack, Teams, Docker               |
 
-### Setup configs
-```
-mkdir ~/bin
-ln -s ~/git/dotfiles/zsh/.zshrc ~/.zshrc
-ln -s ~/git/dotfiles/i3 ~/.config/i3
-ln -s ~/git/dotfiles/dunst ~/.config/dunst
-ln -s ~/git/dotfiles/rofi ~/.config/rofi
-ln -s ~/git/dotfiles/compton.conf ~/.config/
-ln -s ~/git/dotfiles/pavucontrol.ini ~/.config/
+i3 and friends stay on apt because they link against the distro's X server and
+GPU drivers; nixpkgs builds would need `nixGL` wrapping and break on driver
+upgrades. Config files have no such coupling, so home-manager generates them.
 
-ln -s ~/git/dotfiles/bin/keymap_toggle ~/bin/
-ln -s ~/git/dotfiles/bin/touchpad_toggle ~/bin/
-```
+## Layout
 
-### Setup alias
 ```
-echo alias ec=\'emacsclient -n\' >> ~/.zshrc
-echo alias ll=\'ls -laG\' >> ~/.zshrc
+flake.nix                      pinned inputs, one output per machine
+pkgs/x-tools.nix               the X helper scripts, as packages
+home/
+  common/                      applied everywhere: cli, fonts, git, zsh
+  modules/                     opt-in features, each behind my.<name>.enable
+    machine/                   typed options for per-machine hardware values
+    i3/ picom/ rofi/ dunst/    Ubuntu session config, each with its own assets
+    aerospace/                 the i3 stand-in on macOS
+  profiles/                    linux-desktop, darwin-desktop, server
+  users/bjorn/                 laptop.nix, mac.nix, server.nix
+hosts/mac.nix                  nix-darwin: macOS defaults, Homebrew casks
 ```
 
-### Setup i3:
+`common/` is unconditional. Each module in `modules/` declares its own `enable`
+flag and contributes nothing until a profile switches it on. A file under
+`users/` picks a profile and supplies that machine's hardware values. Every
+module is imported on both platforms; platform-specific ones stay inert through
+`mkIf`, so the i3 and AeroSpace modules never leak onto the wrong machine.
+
+Per-machine values (xrandr outputs, touchpad name, wireless interface) are typed
+options in `home/modules/machine`, set in `home/users/bjorn/laptop.nix`. Leaving
+one out fails the build with the option name rather than writing an empty string
+into a config file.
+
+### Adding a machine
+
+Add a file under `home/users/<name>/`, import a profile, set `my.machine` if the
+profile needs it, then add one output to `flake.nix`. A desktop sets hardware
+values through `my.machine`; a headless server imports `profiles/server.nix` and
+sets nothing.
+
+## Ubuntu laptop
+
+### 1. Install Nix
+
+```
+curl -L https://nixos.org/nix/install | sh -s -- --daemon
+mkdir -p ~/.config/nix
+echo 'experimental-features = nix-command flakes' >> ~/.config/nix/nix.conf
+```
+
+Log out and back in, then check: `nix run nixpkgs#hello`
+
+### 2. Install the session stack from apt
+
 ```
 sudo apt update
-sudo apt install -y git i3 compton fonts-font-awesome i3blocks scrot feh xautolock xbacklight
-sudo apt install -y blueman
-sudo apt install -y pasystray
+sudo apt install -y i3 i3blocks i3lock picom rofi dunst \
+     fonts-font-awesome scrot feh xautolock imagemagick \
+     blueman pasystray pavucontrol network-manager-gnome \
+     arandr x11-xserver-utils xinput
 ```
 
-### Modify i3 config
+`picom` replaces the unpackaged `compton`; the old `compton.conf` is still valid
+and is installed as `~/.config/picom.conf`.
 
-Update ~/.config/i3/config
+### 3. Remove any existing dotfile symlinks
 
-- Set correct touchpad name in `$touchpad_name` at the beginning of i3/config.
-  Getting correct pad name using `xinput list`
-
-- Set correct primary screen by defining `$main_window` in the beginning.
-  Use `xrandr` to get primary screen name
-
-- Set correct audio sink index for volume modifications using function keys
-  Use `pactl list sinks` to get the value for $sink_index
-
-### Set i3 as default:
-
-Change to i3 in login screen (click small kog)
-or if older Ubuntu
-```
-sudo vi /etc/lightdm/lightdm.conf
-
-# Change user-session=ubuntu to
-         user-session=i3
-
-# The different and specific config exists at:
-/usr/share/xsessions/i3.desktop
-```
-
-### Add nicer fonts
-```
-cd /usr/share/fonts
-sudo mkdir tmp
-cd tmp
-sudo git clone https://github.com/AppleDesignResources/SanFranciscoFont
-cd SanFranciscoFont
-sudo mv *.otf ../../opentype
-sudo fc-cache -fv
-cd ../..
-sudo rm -rf /usr/share/fonts/tmp
-```
-
-### Setup sound
-```
-## Playerctl - control media players, see: https://github.com/acrisci/playerctl/releases
-cd
-wget https://github.com/altdesktop/playerctl/releases/download/v2.4.1/playerctl-2.4.1_amd64.deb
-sudo dpkg -i ~/playerctl-2.4.1_amd64.deb
-
-# Volume control
-sudo apt install pavucontrol
-```
-
-### Setup nicer notifications
-
-Make sure `dunst` is not already installed
+If an earlier stow-style setup symlinked `$HOME` paths into a dotfiles repo,
+remove those links before the first activation:
 
 ```
-# Install deps
-sudo apt install build-essential libdbus-1-dev libx11-dev libxinerama-dev libxrandr-dev libxss-dev \
-     libglib2.0-dev libpango1.0-dev libgtk-3-dev libxdg-basedir-dev libnotify-dev
-
-git clone https://github.com/dunst-project/dunst.git
-cd dunst
-make
-sudo make install
-
-# Check
-systemctl status --user dunst
-journalctl --user -u dunst.service
-systemctl list-units -t service --all
-
-# Send a test notification
-notify-send -u low Testing low
-notify-send -u normal Testing normal
-notify-send -u critical Testing critical
+find ~ -maxdepth 1 -type l -lname '*dotfiles*'
+find ~/.config -maxdepth 2 -type l -lname '*dotfiles*'
+rm ~/.zshrc ~/.config/i3 ~/.config/dunst ~/.config/rofi ~/.config/compton.conf
 ```
 
-### Better application runner
+A _directory_ symlink such as `~/.config/i3 -> ~/git/dotfiles/i3` makes
+home-manager resolve `~/.config/i3/config` to the repo's own file and back it
+up, turning the input into a link to its own output. Recovering means
+`git checkout` on the affected files and deleting the `.backup` copies.
+
+### 4. Set the machine values
+
+`username` in `flake.nix` names the configuration and is `bjorn` as committed;
+the commands below spell that out because `.#<username>` is a shell redirect.
+
+Fill in `my.machine` in `home/users/bjorn/laptop.nix`:
+
+- `mainOutput` / `extraOutput` / `presentationOutput`: from `xrandr`
+- `touchpadName`: from `xinput list`
+- `wirelessInterface`: from `ip link`
+
+Output names are driver-specific (`eDP-1` on Intel, `eDP-1-1` on Nvidia; externals
+`DP-1` upward). Read them on the machine. An unset or misspelled value fails the
+build with the option name.
+
+### 5. Build before switching
+
+Flakes only read files git knows about, so stage new files first:
+
 ```
-sudo apt install rofi
+git add -N .
+nix build .#homeConfigurations.bjorn.activationPackage
 ```
 
-### Setup screensaver
+This evaluates every module and runs shellcheck over the helper scripts without
+touching `$HOME`, leaving only a `result` symlink.
+
+### 6. Activate
+
 ```
-sudo apt install imagemagick i3lock
+nix run home-manager/release-26.05 -- switch --flake .#bjorn
 ```
 
-### ZSH
+home-manager refuses to overwrite files it does not own, so the first activation
+stops on the existing `~/.zshrc`, `~/.config/i3/config`,
+`~/.config/dunst/dunstrc` and `~/.config/rofi/config.rasi`. Move them aside, or
+rename each to `<file>.backup`:
+
+```
+nix run home-manager/release-26.05 -- switch --flake .#bjorn -b backup
+```
+
+After that, `home-manager switch --flake .#bjorn` is enough.
+
+### 7. Make zsh the login shell
+
+Nix-installed zsh is not in `/etc/shells`, so `chsh` refuses it. Either install
+the apt zsh as the login shell (home-manager still drives its config):
+
 ```
 sudo apt install zsh
-
-# Fonts for shell powerline
-sudo apt-get install fonts-powerline
-sudo fc-cache -vf
-# This seems to need a reboot
-
-sudo apt install curl
-sh -c "$(curl -fsSL https://raw.githubusercontent.com/robbyrussell/oh-my-zsh/master/tools/install.sh)"
+chsh -s /usr/bin/zsh
 ```
 
-#### Turn off zsh shared history
-Add to ~/.zshrc
-```
-unsetopt share_history
-```
+or, if `/etc/passwd` is centrally managed, add to `~/.bashrc`:
 
-#### Check default shell
-
-Make sure zsh is default shell
 ```
-cat /etc/passwd | grep $USER
-```
-or if /etc/passwd is controlled let it be started by bash
-Add to .bashrc:
-```
-# Launch Zsh
-if [ -t 1 ]; then
-  exec zsh
-fi
+if [ -t 1 ]; then exec zsh; fi
 ```
 
-### More about setup oh-my-zsh:
-https://github.com/robbyrussell/oh-my-zsh
-```
-  > vi .zshrc   and change them to:
-  ZSH_THEME="agnoster"
-```
+### 8. Select the i3 session
 
-### Change prompt
-Edit ~/.oh-my-zsh/themes/agnoster.zsh-theme
-```
-prompt_dir() {
-#  prompt_segment blue $CURRENT_FG '%~'
-  prompt_segment blue $CURRENT_FG '%2~'
-}
-```
+Pick i3 at the login screen (the small gear). On older releases, set
+`user-session=i3` in `/etc/lightdm/lightdm.conf`.
 
-### Correcting font
-```
-gsettings set org.gnome.desktop.interface monospace-font-name 'Ubuntu Mono 13'
-```
+### 9. Install Docker
 
-### Install plugins
+The coding-agent containers and the kind cluster need Docker, which Nix does not
+own. Install Docker Engine from its apt repository following
+https://docs.docker.com/engine/install/ubuntu/#install-using-the-repository:
 
-zsh-autosuggestions
 ```
-git clone https://github.com/zsh-users/zsh-autosuggestions ${ZSH_CUSTOM:-~/.oh-my-zsh/custom}/plugins/zsh-autosuggestions
-```
-zsh-syntax-highlighting
-```
-git clone https://github.com/zsh-users/zsh-syntax-highlighting.git $ZSH_CUSTOM/plugins/zsh-syntax-highlighting
+# Add Docker's official GPG key
+sudo apt update
+sudo apt install -y ca-certificates curl
+sudo install -m 0755 -d /etc/apt/keyrings
+sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+sudo chmod a+r /etc/apt/keyrings/docker.asc
+
+# Add the repository to apt sources
+echo \
+  "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu \
+  $(. /etc/os-release && echo "${UBUNTU_CODENAME:-$VERSION_CODENAME}") stable" | \
+  sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+sudo apt update
+
+sudo apt install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin
 ```
 
+Then add your user to the `docker` group and re-log for it to take effect:
 
-### Terminal colors
 ```
-git clone https://github.com/Anthony25/gnome-terminal-colors-solarized.git
-cd gnome-terminal-colors-solarized
-./install.sh
-# Select: dark
-# Select Unnamed
-# Select: YES
-# seebi dir colors, yes
-
-vi ~/.zshrc
-# Add:
-# eval `dircolors ~/.dir_colors/dircolors`
+sudo usermod -aG docker "$USER"
 ```
 
-### Install Linux brew
-```
-sh -c "$(curl -fsSL https://raw.githubusercontent.com/Linuxbrew/install/master/install.sh)"
-test -d ~/.linuxbrew && PATH="$HOME/.linuxbrew/bin:$HOME/.linuxbrew/sbin:$PATH"
-test -d /home/linuxbrew/.linuxbrew && PATH="/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin:$PATH"
-test -r ~/.bash_profile && echo "export PATH='$(brew --prefix)/bin:$(brew --prefix)/sbin'":'"$PATH"' >>~/.bash_profile
-echo "export PATH='$(brew --prefix)/bin:$(brew --prefix)/sbin'":'"$PATH"' >>~/.profile
-```
+Group membership on the socket is what the coding-agent grants assume.
 
-### Install docker-compose
+## macOS
+
+### 1. Install Nix and Homebrew
+
+Nix as above. Homebrew must be installed by hand once; nix-darwin manages the
+cask list but not Homebrew itself:
+
 ```
-# Install docker-composer
-# See: https://docs.docker.com/compose/install/
-# Something like:
-sudo curl -L "https://github.com/docker/compose/releases/download/1.25.3/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
-sudo chmod +x /usr/local/bin/docker-compose
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
 ```
 
-### Nicer less
+### 2. Activate
+
 ```
-sudo apt install source-highlight
-export LESSOPEN="| /usr/share/source-highlight/src-hilite-lesspipe.sh %s"
-export LESS=' -R '
-source-highlight-settings
-sudo mv /usr/share/source-highlight/esc.style /usr/share/source-highlight/esc.style.old
-sudo mv /usr/share/source-highlight/esc.outlang /usr/share/source-highlight/esc.outlang.old
-sudo curl https://raw.githubusercontent.com/jrunning/source-highlight-solarized/master/esc-solarized.outlang -o /usr/share/source-highlight/esc.outlang
-sudo curl https://raw.githubusercontent.com/jrunning/source-highlight-solarized/master/esc-solarized.style -o /usr/share/source-highlight/esc.style
+nix run nix-darwin -- switch --flake .#mac
 ```
 
-### Modify backlight settings
+Then `darwin-rebuild switch --flake .#mac` for later changes. Set `darwinSystem`
+in `flake.nix` to `x86_64-darwin` on an Intel Mac.
+
+There is no i3 on macOS; `home/modules/aerospace` configures AeroSpace, which
+tiles similarly and needs no SIP changes. Keybindings mirror the i3 ones where
+macOS allows it (Alt substitutes for i3's Mod4, which macOS reserves).
+
+## Servers
+
+`stack1` through `stack3` are identical headless `x86_64-linux` boxes wanting the
+CLI tooling (`go`, `kubectl`, `kind`, `helm`, zsh, git) at the same pinned
+versions and nothing graphical. One config
+(`home/users/bjorn/server.nix`, importing `profiles/server.nix`) serves all three
+through the single `stack` flake output.
+
+### 1. Install Nix
+
+As for the laptop; the daemon install needs `sudo` once per server:
+
 ```
-sudo su
-# Get device and set brightness using ACPI
-ls /sys/class/backlight/
-cat /sys/class/backlight/<DEV>/max_brightness
-echo <MAX BRIGHTNESS> > /sys/class/backlight/<DEV>/brightness
-```
-
-### Post-installs
-```
-# Install screenshot app
-sudo apt-get install gnome-screenshot
-
-# Install snap (already available in Ubuntu 20.22)
-sudo apt install snapd
-
-# Brew
-sh -c "$(curl -fsSL https://raw.githubusercontent.com/Linuxbrew/install/master/install.sh)"
-
-# Install Teams client
-> Unofficial Microsoft Teams for Linux clien
-sudo snap install teams-for-linux)
-> or Microsoft Teams progressive web app
-https://aka.ms/get-teams-linux
-
-# Slack
-sudo snap install --classic slack
-
-# Emacs
-sudo snap install emacs --classic
-
-sudo snap install shellcheck
-
-# Build
-apt-get install ninja-build
-
-# Rust
-curl https://sh.rustup.rs -sSf | sh
-
-# Docker
-curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo apt-key add -
-sudo add-apt-repository \
-   "deb [arch=amd64] https://download.docker.com/linux/ubuntu \
-   $(lsb_release -cs) \
-   stable"
-sudo apt-key update && sudo apt-get update
-sudo apt-get install docker-ce
-sudo groupadd docker
-sudo usermod -aG docker $USER
-<reboot>
-docker run hello-world
-
-# Go
-sudo snap install --classic go
-# Alt1: brew install go
-# Alt2: cd ~
-#   curl -O https://storage.googleapis.com/golang/go1.13.8.linux-amd64.tar.gz
-#   tar -xvf go1.13.8.linux-amd64.tar.gz
-
-# Add to ~/.profile
-GOPATH="$HOME/go"
-PATH="$GOPATH/bin:$PATH"
-
-# Erlang
-# brew install erlang
-sudo apt-get -y install autoconf m4
-sudo apt-get -y install libssl-dev
-sudo apt-get -y install libncurses5-dev
-# Enable Observer that needs wxWidgets
-sudo apt-get -y install libwxgtk3.0-dev
-
-# Tools
-sudo apt install arandr tree htop jq
-
-# Other
-# brew install cmake
-# brew install ninja
-
-# Install Chrome
-wget https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
-sudo dpkg -i google-chrome-stable_current_amd64.deb
-
-# K8s tools
-sudo snap install kubectl --classic
-curl https://raw.githubusercontent.com/ahmetb/kubectx/master/kubectx -o ~/bin/kubectx
-chmod +x ~/bin/kubectx
-curl https://raw.githubusercontent.com/ahmetb/kubectx/master/kubens -o ~/bin/kubens
-chmod +x ~/bin/kubens
-curl https://storage.googleapis.com/minikube/releases/latest/minikube-linux-amd64 -o ~/bin/minikube
-chmod +x ~/bin/minikube
-
-# Install Helm3:
-sudo snap install helm --classic
-# Install Helm2:
-mkdir tmp_helm && cd tmp_helm
-wget https://get.helm.sh/helm-v2.16.2-linux-amd64.tar.gz
-tar xzf helm-v2.16.2-linux-amd64.tar.gz
-mv helm ~/bin/helm2
-cd .. && rm -rf ~/tmp_helm
-
-# Install kind
-GO111MODULE="on" go get sigs.k8s.io/kind@v0.7.0
-
-# Nicer cat
-sudo apt install bat
-sudo mv /usr/bin/batcat /usr/bin/bat
+curl -L https://nixos.org/nix/install | sh -s -- --daemon
+mkdir -p ~/.config/nix
+echo 'experimental-features = nix-command flakes' >> ~/.config/nix/nix.conf
 ```
 
+Log out and back in.
 
-### Other
+### 2. Activate
 
-#### Chrome bookmarks:
-`~/.config/google-chrome/Default/Bookmarks`
+Referencing the flake straight from GitHub, so no clone is needed:
 
-#### Setup mouse pointer icon for Google/Firefox..
-`cp -r /usr/share/icons/DMZ-Black/* ~/.local/share/icons/default/`
+```
+nix run home-manager/release-26.05 -- switch --flake github:dorant/nix-config#stack
+```
 
-#### Setup Wifi
+Add `-b backup` on the first run if an existing `~/.zshrc` is in the way. After
+that, `home-manager switch --flake github:dorant/nix-config#stack` is enough.
 
-#### Manually/Graphically setup languages
+`kind` needs a container runtime: install Docker Engine and add your user to the
+`docker` group as in the laptop's "Install Docker" step, following
+https://docs.docker.com/engine/install/ubuntu/#install-using-the-repository.
+Without the group membership `kind create cluster` cannot reach the socket.
+
+## Day to day
+
+```
+# Update inputs
+nix flake update                  # all
+nix flake update nixpkgs          # one
+
+# Apply
+home-manager switch --flake .#bjorn        # Ubuntu
+darwin-rebuild switch --flake .#mac        # macOS
+
+# Roll back
+home-manager generations
+/nix/store/<hash>-home-manager-generation/activate
+```
+
+`flake.lock` pins every input so all machines resolve identical versions until
+updated deliberately. Commit it.
+
+## Checking before switching
+
+```
+nix flake check   # builds the laptop activation package, runs treefmt
+nix run .#lint    # structural checks
+nix fmt           # format every file
+```
+
+`nix flake check` evaluates every module and runs shellcheck without touching
+`$HOME`; the macOS checks only run on the Mac. `nix fmt` runs treefmt (nixfmt,
+shfmt, shellcheck, prettier) and backs the `formatting` check, so CI and local
+runs agree. `nix run .#lint` enforces what the option system cannot:
+
+- every module under `home/modules` is imported by `home/modules/default.nix`
+- every module is enabled by some profile, so none is dead code
+- every enable flag a profile sets names a real module
+- no xrandr output or interface name is hardcoded outside `home/modules/machine`
+
+CI runs all three on push and weekly. `.pre-commit-config.yaml` wires the same
+formatter and lint into a git hook; `pre-commit install` to enable it.
+
+## Coding agents
+
+Kiro and Claude Code run in containers built outside this flake
+(`containers/kiro-cli/Dockerfile`); home-manager owns their configuration and the
+wrappers that launch them.
+
+The steering rules live once, in `home/modules/agents/rules/`, as tool-agnostic
+markdown. The module adapts them per tool: Kiro reads a directory mounted at
+`~/.kiro/steering`; Claude reads a single `CLAUDE.md` concatenated from the same
+files. Editing a rule needs no image rebuild.
+
+### The GitHub token
+
+The wrappers pass a GitHub token into the container as `GH_TOKEN`, read from
+`GH_VALKEY_OPERATOR_READONLY_TOKEN`. That value is kept out of git and the
+world-readable Nix store: zsh's `~/.zshenv` sources `~/.config/gh_secrets.env`
+if it exists, reaching interactive and non-interactive shells alike.
+
+Create the file by hand on each machine that runs the agents; activation does
+not create it, and a missing file just leaves `GH_TOKEN` empty:
+
+```
+install -m 600 /dev/null ~/.config/gh_secrets.env
+cat > ~/.config/gh_secrets.env <<'EOF'
+export GH_VALKEY_OPERATOR_READONLY_TOKEN=ghp_your_token_here
+EOF
+```
+
+To copy it to another machine, keep the owner-only permissions:
+
+```
+ssh <host> 'mkdir -p ~/.config'
+scp ~/.config/gh_secrets.env <host>:~/.config/gh_secrets.env
+ssh <host> 'chmod 600 ~/.config/gh_secrets.env'
+```
+
+### What isolates what
+
+The container user is uid 1000, the same as the host user, so running as
+non-root is not a boundary against your own files. The isolation comes from the
+mount list: only the current project is mounted, so `~/.ssh`, `~/.aws` and the
+rest of `$HOME` are absent.
+
+That makes the Docker socket the thing to guard: anything holding it can start a
+privileged container that mounts `/`. Hence four commands with different grants:
+
+| Command     | Grants                                              | For                        |
+| ----------- | --------------------------------------------------- | -------------------------- |
+| `kiro-cli`  | project, plus read-only kubeconfig                  | everyday work              |
+| `kiro-fi`   | the above read-write, plus the Docker socket        | cluster creation, builds   |
+| `claude`    | project, plus host network and read-only kubeconfig | code work, testing on kind |
+| `claude-fi` | the above read-write, plus the Docker socket        | fault injection            |
+
+The `-fi` wrappers carry the Docker socket because cluster creation, image
+builds (`docker build`, `kind load`) and fault injection (`crictl`, `nsenter`)
+need it; everyday work does not, so it stays off the plain wrappers.
+
+`--network host` on the Claude wrappers is needed because a kind cluster's
+kubeconfig names `127.0.0.1`, which inside a container is the container.
+Exposing host network services is a much smaller grant than the socket.
+
+## Not covered by this flake
+
+- rbenv, pnpm, cargo and per-language `PATH` entries. Use `direnv` with a
+  per-project `flake.nix` instead; `programs.direnv` is enabled in
+  `home/common/cli`.
+- Docker Engine. Installed from Docker's apt repository, not Nix; see the
+  "Install Docker" step under Ubuntu laptop.
