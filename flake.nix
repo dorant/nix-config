@@ -120,6 +120,7 @@
             home-manager = {
               useGlobalPkgs = true;
               useUserPackages = true;
+              backupFileExtension = "before-nix-darwin";
               # home/common takes username as a module argument.
               extraSpecialArgs = { inherit username mattpocock-skills; };
               users.${username}.imports = [ ./home/users/bjorn/mac.nix ];

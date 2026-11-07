@@ -43,11 +43,11 @@
       upgrade = true;
     };
     casks = [
-      "alacritty"
       "google-chrome"
       "slack"
       "microsoft-teams"
-      "emacs"
+      "emacs-app"
+      "nikitabobko/tap/aerospace"
     ];
   };
 }

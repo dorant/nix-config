@@ -202,11 +202,33 @@ cask list but not Homebrew itself:
 
 ### 2. Activate
 
+Recent nix-darwin requires root for system activation, and the bootstrap
+command must carry the experimental-features flags because root's Nix config
+does not have them yet:
+
 ```
-nix run nix-darwin -- switch --flake .#mac
+sudo nix --extra-experimental-features "nix-command flakes" run nix-darwin -- switch --flake .#mac
 ```
 
-Then `darwin-rebuild switch --flake .#mac` for later changes. Set `darwinSystem`
+On a fresh macOS install, `/etc/bashrc` and `/etc/zshrc` exist with Apple's
+default content. nix-darwin refuses to overwrite files it did not create, so
+rename them first:
+
+```
+sudo mv /etc/bashrc /etc/bashrc.before-nix-darwin
+sudo mv /etc/zshrc /etc/zshrc.before-nix-darwin
+```
+
+nix-darwin writes its own versions and sources the originals at the bottom, so
+nothing in those files is lost. Then re-run the activation command above.
+
+Then for later changes:
+
+```
+sudo darwin-rebuild switch --flake .#mac
+```
+
+Set `darwinSystem`
 in `flake.nix` to `x86_64-darwin` on an Intel Mac.
 
 There is no i3 on macOS; `home/modules/aerospace` configures AeroSpace, which
@@ -258,7 +280,7 @@ nix flake update nixpkgs          # one
 
 # Apply
 home-manager switch --flake .#bjorn        # Ubuntu
-darwin-rebuild switch --flake .#mac        # macOS
+sudo darwin-rebuild switch --flake .#mac   # macOS
 
 # Roll back
 home-manager generations
