@@ -67,6 +67,18 @@ RUN curl -fsSL "https://download.docker.com/linux/static/stable/x86_64/docker-${
     && chmod 0755 /usr/local/bin/docker \
     && docker --version
 
+# Buildx, as a Docker CLI plugin. The static docker client tarball above ships
+# no plugins, and Docker 27 routes `docker build` through buildx, so without
+# this the build subcommand fails even with the host socket mounted: buildx is
+# a client-side plugin that must exist in the container, independent of which
+# daemon the socket reaches. Installed into the CLI-plugins search path.
+ARG BUILDX_VERSION=v0.17.1
+RUN mkdir -p /usr/local/libexec/docker/cli-plugins \
+    && curl -fsSLo /usr/local/libexec/docker/cli-plugins/docker-buildx \
+      "https://github.com/docker/buildx/releases/download/${BUILDX_VERSION}/buildx-${BUILDX_VERSION}.linux-amd64" \
+    && chmod 0755 /usr/local/libexec/docker/cli-plugins/docker-buildx \
+    && docker buildx version
+
 # Go, for building and testing the operator in-container. Pinned only as a
 # bootstrap: projects that set GOTOOLCHAIN from a .go-version (as
 # valkey-operator does) make this Go fetch the matching toolchain itself, so
